@@ -1,9 +1,10 @@
 package com.secful.scraper
 
-import java.io.FileOutputStream
+import java.io.{FileNotFoundException, FileOutputStream}
 import java.net.URL
 import java.nio.ByteBuffer
 import java.nio.file.{Files, Path}
+import scala.io.Source
 
 object FileUtils {
 
@@ -26,6 +27,19 @@ object FileUtils {
       fileChannel.write(content)
     }finally {
       fileChannel.close()
+    }
+  }
+
+  def readFileAsText(path: Path): String = {
+    if(path.toFile.exists()){
+        val fileSource = Source.fromFile(path.toFile)
+      try {
+        fileSource.getLines().mkString("\n")
+      } finally {
+        fileSource.close()
+      }
+    }else{
+      throw new FileNotFoundException(path.toString)
     }
   }
 }

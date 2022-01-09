@@ -10,18 +10,23 @@ import com.secful.scraper.ImageDownloadActor.DownloadImagesRequest
 
 import java.net.URL
 import java.nio.file.{Files, Path}
-import scala.concurrent.{ExecutionContext, Future}
+import scala.concurrent.{ExecutionContext, ExecutionContextExecutor, Future}
 import scala.concurrent.duration.DurationInt
 import cats.data.EitherT
 import cats.implicits._
 import com.secful.scraper.Scraper.{ScrapeImagesRequest, WebsiteContext}
 
 import java.nio.file.attribute.{PosixFilePermission, PosixFilePermissions}
-import scala.jdk.CollectionConverters._
+import java.util.concurrent.Executors
 
 class HtmlParsingActor extends Actor {
   implicit val as = context.system
-  implicit val ec = context.dispatcher
+  private val threadPool = Executors.newFixedThreadPool(5)
+  implicit val ec: ExecutionContextExecutor = ExecutionContext.fromExecutor(threadPool)
+
+  override def postStop(): Unit = {
+    threadPool.shutdown()
+  }
 
   override def receive: Receive = {
     case ParseWebsiteImages(website@WebsiteContext(_, url)) =>
@@ -52,14 +57,19 @@ object HtmlParsingActor {
 
 class ImageDownloadActor extends Actor {
   implicit val as = context.system
-  implicit val ec = context.dispatcher
+  private val threadPool = Executors.newFixedThreadPool(10)
+  implicit val ec: ExecutionContextExecutor = ExecutionContext.fromExecutor(threadPool)
+
+  override def postStop(): Unit = {
+    threadPool.shutdown()
+  }
 
   override def receive: Receive = {
     case DownloadImagesRequest(website, urls) =>
       val capturedSender = sender()
 
       val downloadedImages: Future[Seq[Either[ImageDownloadError, Image]]] = Source(urls)
-        .mapAsync(5)(url => HttpUtils.fetchResource(url)
+        .mapAsync(10)(url => HttpUtils.fetchResource(url)
           .map(bf => Image(FileUtils.getFileNameFromUrl(url), bf))
           .map(Right(_))
           .recover({
@@ -80,7 +90,12 @@ object ImageDownloadActor {
 }
 
 class FileSystemActor extends Actor {
-  implicit val ec: ExecutionContext = context.dispatcher
+  private val threadPool = Executors.newFixedThreadPool(5)
+  implicit val ec: ExecutionContextExecutor = ExecutionContext.fromExecutor(threadPool)
+
+  override def postStop(): Unit = {
+    threadPool.shutdown()
+  }
 
   def writeImages(images: Seq[Image], outputDir: Path)(implicit websiteContext: WebsiteContext): Future[Seq[Either[FileWritingError, Path]]] = {
     Future.sequence(images.map(image => {
@@ -98,13 +113,15 @@ class FileSystemActor extends Actor {
   }
 
   override def receive: Receive = {
-    case StoreImagesRequest(website, images) => {
+    case StoreImagesRequest(website, images) =>
+      import scala.jdk.CollectionConverters._
+
+      val capturedSender = sender()
       val outputDir: Path = Path.of(s"/tmp/${website.name}")
       Files.createDirectories(outputDir, PosixFilePermissions.asFileAttribute(PosixFilePermission.values().toSet.asJava))
 
-      val writeResult: Future[Seq[Either[FileWritingError, Path]]] = writeImages(images, outputDir)(website)
-      sender() ! writeResult
-    }
+      val writeResultFuture: Future[Seq[Either[FileWritingError, Path]]] = writeImages(images, outputDir)(website)
+      writeResultFuture.onComplete(res => capturedSender ! res.get)
   }
 }
 
@@ -145,8 +162,7 @@ class ScraperActor extends Actor {
   def storeImages(images: Seq[Image])
                  (implicit website: WebsiteContext): Future[Either[ScraperError, Seq[Path]]] = {
     (fsActor ? StoreImagesRequest(website, images))
-      .mapTo[Future[Seq[Either[ScraperError, Path]]]]
-      .flatMap(identity)
+      .mapTo[Seq[Either[ScraperError, Path]]]
       .map(results => {
         val successful = results.flatMap(_.toOption)
         val errors = results.flatMap(_.left.toOption)
@@ -161,6 +177,8 @@ class ScraperActor extends Actor {
   override def receive: Receive = {
     case r: ScrapeImagesRequest =>
       implicit val websiteContext: WebsiteContext = r.website
+      val capturedSender = sender()
+
       val scrapingResult = for {
         htmlElements <- EitherT(parseWebsiteImages)
         imageUrls = htmlElements.elements.map(_.url)
@@ -174,7 +192,7 @@ class ScraperActor extends Actor {
         storedFiles
       }
 
-      sender() ! scrapingResult.value
+      scrapingResult.value.onComplete(res => capturedSender ! res.get)
   }
 }
 
@@ -185,8 +203,7 @@ object Scraper {
 
   def scrapeWebsite(websiteContext: WebsiteContext): Future[Either[ScraperError, Seq[Path]]] = {
     (scraperActor ? ScrapeImagesRequest(websiteContext))
-      .mapTo[Future[Either[ScraperError, Seq[Path]]]]
-      .flatMap(identity)(scraperSystem.dispatcher)
+      .mapTo[Either[ScraperError, Seq[Path]]]
   }
 
   case class ScrapeImagesRequest(website: WebsiteContext)

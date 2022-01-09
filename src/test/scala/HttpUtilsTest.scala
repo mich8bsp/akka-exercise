@@ -1,9 +1,8 @@
 import akka.actor.ActorSystem
-import akka.testkit.{ImplicitSender, TestKit}
+import akka.testkit.TestKit
 import com.secful.scraper.HttpUtils
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.flatspec.AsyncFlatSpecLike
-import org.scalatest.matchers.should.Matchers
 
 import java.net.URL
 
