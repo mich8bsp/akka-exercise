@@ -2,6 +2,7 @@ package com.secful.scraper
 
 import akka.util.ByteString
 import org.jsoup.Jsoup
+import org.jsoup.parser.Parser
 
 import java.net.URL
 import scala.jdk.CollectionConverters.ListHasAsScala
@@ -10,8 +11,16 @@ import scala.util.Try
 object HtmlUtils {
 
   def parseImages(page: String): Either[String, Seq[HtmlImageElement]] = {
+    val parser = Parser.htmlParser
+      .setTrackErrors(1)
+
     Try({
-      val elements = Jsoup.parse(page)
+      val dom = Jsoup.parse(page, parser)
+
+      if(!parser.getErrors.isEmpty){
+        throw new Exception(parser.getErrors.get(0).getErrorMessage)
+      }
+      val elements = dom
         .select("img")
       elements.eachAttr("src")
         .asScala

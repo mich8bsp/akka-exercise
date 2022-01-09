@@ -7,8 +7,7 @@ import akka.stream.scaladsl.Sink
 import akka.util.ByteString
 
 import java.net.URL
-import scala.concurrent.duration.DurationInt
-import scala.concurrent.{Await, ExecutionContext, Future}
+import scala.concurrent.{ExecutionContext, Future}
 
 object HttpUtils {
 
@@ -22,14 +21,5 @@ object HttpUtils {
     }yield {
       dataBytes.foldLeft(ByteString.empty)(_ ++ _)
     }
-  }
-
-  def main(args: Array[String]): Unit = {
-    implicit val as = ActorSystem("test")
-    implicit val ec = as.dispatcher
-    val res = fetchResource(new URL("https://salt.security"))
-
-    val fetched = ((Await.result(res, 5.seconds)).utf8String)
-    println(HtmlUtils.parseImages(fetched))
   }
 }
