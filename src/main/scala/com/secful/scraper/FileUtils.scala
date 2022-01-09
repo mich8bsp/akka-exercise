@@ -15,18 +15,6 @@ object FileUtils {
     }
   }
 
-  def listDirs(dir: Path): List[Path] = {
-    val dirFile = dir.toFile
-    if (dirFile.exists && dirFile.isDirectory) {
-      dirFile.listFiles()
-        .filter(_.isDirectory)
-        .map(_.toPath)
-        .toList
-    } else {
-      List[Path]()
-    }
-  }
-
   def writeFile(path: Path,
                 content: ByteBuffer,
                 overrideIfExists: Boolean = false): Unit = {

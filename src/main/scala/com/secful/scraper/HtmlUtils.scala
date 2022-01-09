@@ -10,7 +10,7 @@ import scala.util.Try
 
 object HtmlUtils {
 
-  def parseImages(page: String): Either[String, Seq[HtmlImageElement]] = {
+  def parseImages(page: String, source: Option[URL] = None): Either[String, Seq[HtmlImageElement]] = {
     val parser = Parser.htmlParser
       .setTrackErrors(1)
 
@@ -26,10 +26,26 @@ object HtmlUtils {
         .asScala
         .toSeq
         .distinct
-        .map(url => HtmlImageElement(new URL(url)))
+        .map(url => {
+          val absoluteUrl: URL = if (url.startsWith("http")) {
+            new URL(url)
+          } else if (url.startsWith("www")){
+            new URL(s"https://$url")
+          }else {
+            new URL(s"${source.map(getSourceDirPath).map(_.toString).getOrElse("")}$url")
+          }
+          HtmlImageElement(absoluteUrl)
+        })
     }).toEither.left.map(e => s"Invalid HTML page: ${e.getMessage}")
   }
 
+  private [HtmlUtils] def getSourceDirPath(source: URL): URL = {
+    if(source.toString.contains("/")){
+      new URL(source.toString.substring(0, source.toString.lastIndexOf("/") + 1))
+    }else{
+      source
+    }
+  }
 }
 
 trait HtmlElement

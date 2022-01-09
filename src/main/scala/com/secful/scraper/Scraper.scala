@@ -7,7 +7,6 @@ import akka.util.Timeout
 import com.secful.scraper.FileSystemActor.StoreImagesRequest
 import com.secful.scraper.HtmlParsingActor.{ParseWebsiteImages, WebsiteImageElements}
 import com.secful.scraper.ImageDownloadActor.DownloadImagesRequest
-import com.secful.scraper.Scraper.{FileWritingError, FilesWritingError, HtmlParsingError, ImageDownloadError, ImagesDownloadError, ScrapeImagesRequest, ScraperError, WebsiteContext}
 
 import java.net.URL
 import java.nio.file.{Files, Path}
@@ -15,6 +14,7 @@ import scala.concurrent.{ExecutionContext, Future}
 import scala.concurrent.duration.DurationInt
 import cats.data.EitherT
 import cats.implicits._
+import com.secful.scraper.Scraper.{ScrapeImagesRequest, WebsiteContext}
 
 import java.nio.file.attribute.{PosixFilePermission, PosixFilePermissions}
 import scala.jdk.CollectionConverters._
@@ -25,19 +25,21 @@ class HtmlParsingActor extends Actor {
 
   override def receive: Receive = {
     case ParseWebsiteImages(website@WebsiteContext(_, url)) =>
-      val res: Future[Either[ScraperError, WebsiteImageElements]] = (for {
+      val capturedSender = sender()
+
+      val parsedImagesFuture: Future[Either[ScraperError, WebsiteImageElements]] = (for {
         htmlPage <- EitherT(HttpUtils.fetchResource(url)
           .map(r => Right(r.utf8String))
           .recover({
             case e: Throwable => Left(HtmlParsingError(website, s"Failed to fetch website: ${e.getMessage}"))
           }))
-        elements <- EitherT.fromEither[Future](HtmlUtils.parseImages(htmlPage)
+        elements <- EitherT.fromEither[Future](HtmlUtils.parseImages(htmlPage, Some(url))
         .leftMap(err => HtmlParsingError(website, s"Failed to parse images: $err")))
       }yield {
         WebsiteImageElements(elements)
       }).value
 
-      sender() ! res
+      parsedImagesFuture.onComplete(res => capturedSender ! res.get)
   }
 }
 
@@ -54,6 +56,8 @@ class ImageDownloadActor extends Actor {
 
   override def receive: Receive = {
     case DownloadImagesRequest(website, urls) =>
+      val capturedSender = sender()
+
       val downloadedImages: Future[Seq[Either[ImageDownloadError, Image]]] = Source(urls)
         .mapAsync(5)(url => HttpUtils.fetchResource(url)
           .map(bf => Image(FileUtils.getFileNameFromUrl(url), bf))
@@ -65,7 +69,7 @@ class ImageDownloadActor extends Actor {
         .toMat(Sink.seq)(Keep.right)
         .run()
 
-      sender() ! downloadedImages
+      downloadedImages.onComplete(res => capturedSender ! res.get)
   }
 }
 
@@ -120,15 +124,13 @@ class ScraperActor extends Actor {
 
   def parseWebsiteImages(implicit website: WebsiteContext): Future[Either[ScraperError, WebsiteImageElements]] = {
     (parserActor ? ParseWebsiteImages(website))
-      .mapTo[Future[Either[ScraperError, WebsiteImageElements]]]
-      .flatMap(identity)
+      .mapTo[Either[ScraperError, WebsiteImageElements]]
   }
 
   def downloadImages(urls: Seq[URL])
                     (implicit website: WebsiteContext): Future[Either[ScraperError, Seq[Image]]] = {
     (downloadActor ? DownloadImagesRequest(website, urls))
-      .mapTo[Future[Seq[Either[ScraperError, Image]]]]
-      .flatMap(identity)
+      .mapTo[Seq[Either[ScraperError, Image]]]
       .map(results => {
         val successful = results.flatMap(_.toOption)
         val errors = results.flatMap(_.left.toOption)
@@ -189,49 +191,5 @@ object Scraper {
 
   case class ScrapeImagesRequest(website: WebsiteContext)
   case class WebsiteContext(name: String, url: URL)
-
-  sealed trait ScraperError{
-    val website: WebsiteContext
-    val reason: String
-  }
-  case class HtmlParsingError(website: WebsiteContext, reason: String) extends ScraperError {
-    override def toString: String = s"Failed to parse website ${website.name} at ${website.url}: $reason"
-  }
-  case class ImageDownloadError(website: WebsiteContext, imageUrl: URL, reason: String) extends ScraperError {
-    override def toString: String = s"Failed to download image ${imageUrl} from website ${website.name} at ${website.url}: $reason"
-  }
-  case class ImagesDownloadError(website: WebsiteContext, imageUrls: Seq[URL], reason: String) extends ScraperError {
-    override def toString: String = s"Failed to download ${imageUrls.size} images from website ${website.name} at ${website.url}: $reason"
-  }
-  object ImagesDownloadError{
-    def combine(errors: Seq[ScraperError]): ImagesDownloadError = {
-      require(errors.nonEmpty)
-      val imageUrls = errors.flatMap({
-        case ImageDownloadError(_, url, _) => Some(url)
-        case _ => None
-      })
-      ImagesDownloadError(errors.head.website, imageUrls, errors.map(_.reason).mkString(" ; "))
-    }
-  }
-
-  case class FileWritingError(website: WebsiteContext, image: Image, reason: String) extends ScraperError {
-    override def toString: String = s"Failed to write image ${image.fileName} for website ${website.name}: $reason"
-  }
-
-  case class FilesWritingError(website: WebsiteContext, images: Seq[Image], reason: String) extends ScraperError {
-    override def toString: String = s"Failed to write ${images.size} images downloaded from ${website.name}: $reason"
-  }
-
-  object FilesWritingError{
-    def combine(errors: Seq[ScraperError]): FilesWritingError = {
-      require(errors.nonEmpty)
-      val images = errors.flatMap({
-        case FileWritingError(_, image, _) => Some(image)
-        case _ => None
-      })
-      FilesWritingError(errors.head.website, images, errors.map(_.reason).mkString(" ; "))
-    }
-  }
-
 }
 

@@ -19,6 +19,17 @@ class HtmlUtilsTest extends AnyFlatSpec with BeforeAndAfterAll with Matchers{
        |</html>
        |""".stripMargin
 
+  private val validHtmlRelative =
+    s"""
+       |<html>
+       |  <body>
+       |    <div>
+       |      <img src="testy.png" alt="sdfs">
+       |    </div>
+       |  </body>
+       |</html>
+       |""".stripMargin
+
   private val validHtmlNoImages =
     s"""
        |<html>
@@ -34,6 +45,12 @@ class HtmlUtilsTest extends AnyFlatSpec with BeforeAndAfterAll with Matchers{
 
   it should "parse images from valid html" in {
     HtmlUtils.parseImages(validHtml) shouldBe Right(List[HtmlImageElement](
+      HtmlImageElement(new URL("https://salt-security.com/testy.png"))
+    ))
+  }
+
+  it should "parse images from valid html with source" in {
+    HtmlUtils.parseImages(validHtmlRelative, Some(new URL("https://salt-security.com/index.html"))) shouldBe Right(List[HtmlImageElement](
       HtmlImageElement(new URL("https://salt-security.com/testy.png"))
     ))
   }
