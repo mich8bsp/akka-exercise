@@ -4,7 +4,7 @@ import akka.util.ByteString
 import com.secful.scraper.FileSystemActor.StoreImagesRequest
 import com.secful.scraper.HtmlParsingActor.{ParseWebsiteImages, WebsiteImageElements}
 import com.secful.scraper.ImageDownloadActor.DownloadImagesRequest
-import com.secful.scraper.Scraper.WebsiteContext
+import com.secful.scraper.Scraper.{GetScrapedImagesRequest, WebsiteContext}
 import com.secful.scraper._
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.matchers.should.Matchers
@@ -101,16 +101,23 @@ class ScraperTest extends TestKit(ActorSystem("scraper-test"))
     "store images to disk" in {
       within(5.seconds) {
         val imageFileName = "testy.png"
-        val request = StoreImagesRequest(
+        val storeRequest = StoreImagesRequest(
           website = exampleWebsiteContext,
           images = Seq(Image(imageFileName, ByteString("dummy image")))
         )
 
-        fileSystemActor ! request
+        fileSystemActor ! storeRequest
         expectMsg(Seq(Right(testImageOutputPath)))
         val writtenFile = testImageOutputPath.toFile
         writtenFile.exists() shouldBe true
         FileUtils.readFileAsText(testImageOutputPath) shouldBe "dummy image"
+
+        val listRequest = GetScrapedImagesRequest(
+          website = exampleWebsiteContext
+        )
+
+        fileSystemActor ! listRequest
+        expectMsg(Right(Seq(testImageOutputPath)))
       }
     }
   }

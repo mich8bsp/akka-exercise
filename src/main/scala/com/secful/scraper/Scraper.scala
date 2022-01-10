@@ -14,7 +14,7 @@ import scala.concurrent.{ExecutionContext, ExecutionContextExecutor, Future}
 import scala.concurrent.duration.DurationInt
 import cats.data.EitherT
 import cats.implicits._
-import com.secful.scraper.Scraper.{ScrapeImagesRequest, WebsiteContext}
+import com.secful.scraper.Scraper.{GetScrapedImagesRequest, ScrapeImagesRequest, WebsiteContext}
 
 import java.nio.file.attribute.{PosixFilePermission, PosixFilePermissions}
 import java.util.concurrent.Executors
@@ -97,7 +97,7 @@ class FileSystemActor extends Actor {
     threadPool.shutdown()
   }
 
-  def writeImages(images: Seq[Image], outputDir: Path)(implicit websiteContext: WebsiteContext): Future[Seq[Either[FileWritingError, Path]]] = {
+  def writeImages(images: Seq[Image], outputDir: Path)(implicit websiteContext: WebsiteContext): Future[Seq[Either[ImageFileWritingError, Path]]] = {
     Future.sequence(images.map(image => {
       val imageWriteTask = Future {
         val imagePath = Path.of(s"${outputDir.toString}/${image.fileName}")
@@ -107,7 +107,7 @@ class FileSystemActor extends Actor {
         imagePath
       }
       imageWriteTask.map(Right(_)).recover({
-        case e: Throwable => Left(FileWritingError(websiteContext, image, e.getMessage))
+        case e: Throwable => Left(ImageFileWritingError(websiteContext, image, e.getMessage))
       })
     }))
   }
@@ -120,8 +120,18 @@ class FileSystemActor extends Actor {
       val outputDir: Path = Path.of(s"/tmp/${website.name}")
       Files.createDirectories(outputDir, PosixFilePermissions.asFileAttribute(PosixFilePermission.values().toSet.asJava))
 
-      val writeResultFuture: Future[Seq[Either[FileWritingError, Path]]] = writeImages(images, outputDir)(website)
+      val writeResultFuture: Future[Seq[Either[ImageFileWritingError, Path]]] = writeImages(images, outputDir)(website)
       writeResultFuture.onComplete(res => capturedSender ! res.get)
+    case GetScrapedImagesRequest(website) =>
+      val capturedSender = sender()
+      val imagesFuture: Future[Either[ScraperError, Seq[Path]]] = Future {
+        FileUtils.listFilesInDir(Path.of(s"/tmp/${website.name}"))
+      }.map(Right(_))
+        .recover({
+          case e: Throwable => Left(ImageFilesReadingError(website, e.getMessage))
+        })
+
+      imagesFuture.onComplete(res => capturedSender ! res.get)
   }
 }
 
@@ -167,11 +177,16 @@ class ScraperActor extends Actor {
         val successful = results.flatMap(_.toOption)
         val errors = results.flatMap(_.left.toOption)
         if(errors.nonEmpty){
-          Left(FilesWritingError.combine(errors))
+          Left(ImageFilesWritingError.combine(errors))
         }else{
           Right(successful)
         }
       })
+  }
+
+  def getStoredImages(website: WebsiteContext): Future[Either[ScraperError, Seq[Path]]] = {
+    (fsActor ? GetScrapedImagesRequest(website))
+      .mapTo[Either[ScraperError, Seq[Path]]]
   }
 
   override def receive: Receive = {
@@ -193,6 +208,12 @@ class ScraperActor extends Actor {
       }
 
       scrapingResult.value.onComplete(res => capturedSender ! res.get)
+
+    case r: GetScrapedImagesRequest =>
+      val capturedSender = sender()
+      val images = getStoredImages(r.website)
+
+      images.onComplete(res => capturedSender ! res.get)
   }
 }
 
@@ -206,7 +227,13 @@ object Scraper {
       .mapTo[Either[ScraperError, Seq[Path]]]
   }
 
+  def getScrapedImages(websiteContext: WebsiteContext): Future[Either[ScraperError, Seq[Path]]] = {
+    (scraperActor ? GetScrapedImagesRequest(websiteContext))
+      .mapTo[Either[ScraperError, Seq[Path]]]
+  }
+
   case class ScrapeImagesRequest(website: WebsiteContext)
+  case class GetScrapedImagesRequest(website: WebsiteContext)
   case class WebsiteContext(name: String, url: URL)
 }
 

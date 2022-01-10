@@ -28,21 +28,25 @@ object ImagesDownloadError{
   }
 }
 
-case class FileWritingError(website: WebsiteContext, image: Image, reason: String) extends ScraperError {
+case class ImageFileWritingError(website: WebsiteContext, image: Image, reason: String) extends ScraperError {
   override def toString: String = s"Failed to write image ${image.fileName} for website ${website.name}: $reason"
 }
 
-case class FilesWritingError(website: WebsiteContext, images: Seq[Image], reason: String) extends ScraperError {
+case class ImageFilesWritingError(website: WebsiteContext, images: Seq[Image], reason: String) extends ScraperError {
   override def toString: String = s"Failed to write ${images.size} images downloaded from ${website.name}: $reason"
 }
 
-object FilesWritingError{
-  def combine(errors: Seq[ScraperError]): FilesWritingError = {
+object ImageFilesWritingError{
+  def combine(errors: Seq[ScraperError]): ImageFilesWritingError = {
     require(errors.nonEmpty)
     val images = errors.flatMap({
-      case FileWritingError(_, image, _) => Some(image)
+      case ImageFileWritingError(_, image, _) => Some(image)
       case _ => None
     })
-    FilesWritingError(errors.head.website, images, errors.map(_.reason).mkString(" ; "))
+    ImageFilesWritingError(errors.head.website, images, errors.map(_.reason).mkString(" ; "))
   }
+}
+
+case class ImageFilesReadingError(website: WebsiteContext, reason: String) extends ScraperError{
+  override def toString: String = s"Failed to read images downloaded from website ${website.name}: $reason"
 }

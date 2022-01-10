@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+package com.secful.scraperservice;
+
+service Scraper {
+    rpc Scrape (ScrapeRequest) returns (ScrapedImages) {}
+    rpc GetScraped (GetScrapedRequest) returns (ScrapedImages) {}
+}
+
+message ScrapeRequest {
+    Website website = 1;
+}
+
+message GetScrapedRequest {
+    Website website = 1;
+}
+
+message Website {
+    string name = 1;
+    string url = 2;
+}
+
+message ScrapedImages {
+    repeated string image_paths = 1;
+}
