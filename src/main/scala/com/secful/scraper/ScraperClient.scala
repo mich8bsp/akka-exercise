@@ -14,14 +14,21 @@ import scala.concurrent.{Await, ExecutionContext, Future}
 
 object ScraperClient {
 
-  def apply(host: String, port: Int): ScraperClient = {
-    val channel = ManagedChannelBuilder.forAddress(host, port).usePlaintext().build
+  def apply(host: String, port: Int, useTls: Boolean = true): ScraperClient = {
+    val channel: ManagedChannel = {
+      val builder = ManagedChannelBuilder.forAddress(host, port)
+      if (useTls) {
+        builder.useTransportSecurity().build
+      } else {
+        builder.usePlaintext().build
+      }
+    }
     val stub = ScraperGrpc.stub(channel)
     new ScraperClient(channel, stub)
   }
 
   def main(args: Array[String]): Unit = {
-    val client = ScraperClient("localhost", 8080)
+    val client = ScraperClient("localhost", 8080, useTls = false)
     val scrapedRes = client.scrapeImages(WebsiteContext("salt", new URL("https://salt.security")))
 
     println(Await.result(scrapedRes, 30.seconds))
@@ -29,8 +36,8 @@ object ScraperClient {
 }
 
 class ScraperClient private(
-                           private val channel: ManagedChannel,
-                           private val stub: ScraperStub
+                             private val channel: ManagedChannel,
+                             private val stub: ScraperStub
                            ) {
   private val threadpool = Executors.newFixedThreadPool(2)
   private implicit val ec: ExecutionContext = ExecutionContext.fromExecutor(threadpool)

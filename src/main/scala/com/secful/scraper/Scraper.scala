@@ -220,7 +220,7 @@ class ScraperActor extends Actor {
 object Scraper {
   private val scraperSystem = ActorSystem("scraper-system")
   private val scraperActor: ActorRef = scraperSystem.actorOf(Props(new ScraperActor), "scraper-actor")
-  private [scraper] implicit val timeout: Timeout = 5.seconds
+  private [scraper] implicit val timeout: Timeout = 15.seconds
 
   def scrapeWebsite(websiteContext: WebsiteContext): Future[Either[ScraperError, Seq[Path]]] = {
     (scraperActor ? ScrapeImagesRequest(websiteContext))
