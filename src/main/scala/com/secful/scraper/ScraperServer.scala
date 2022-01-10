@@ -2,30 +2,47 @@ package com.secful.scraper
 
 import com.secful.scraper.Scraper.WebsiteContext
 import com.secful.scraperservice.scraper_service.{GetScrapedRequest, ScrapeRequest, ScrapedImages, ScraperGrpc}
-import io.grpc.{Server, ServerBuilder}
+import io.grpc.{Server, ServerBuilder, Status}
 
 import scala.concurrent.{ExecutionContext, Future}
 
 private class ScraperImpl(implicit ec: ExecutionContext) extends ScraperGrpc.Scraper {
-  override def scrape(request: ScrapeRequest): Future[ScrapedImages] = Future {
-    val website: WebsiteContext = ScraperServiceModelConversions.fromProto(request.website.getOrElse(
-      throw new IllegalArgumentException("missing website parameter in scrape request")
-    ))
-    Scraper.scrapeWebsite(website).map({
-      case Left(error) => throw new Exception(error.toString)
-      case Right(images) => ScrapedImages(images.map(_.toString))
+  override def scrape(request: ScrapeRequest): Future[ScrapedImages] = {
+    val websiteFut: Future[WebsiteContext] = request.website.map(ScraperServiceModelConversions.fromProto)
+      .map(Future.successful)
+      .getOrElse(Future.failed(
+        Status.INVALID_ARGUMENT
+          .augmentDescription("Missing website parameter in scrape request")
+          .asRuntimeException()
+      ))
+    websiteFut.flatMap(website => {
+      Scraper.scrapeWebsite(website).map({
+        case Left(error) => throw Status.INTERNAL
+          .augmentDescription(error.toString)
+          .asRuntimeException()
+        case Right(images) => ScrapedImages(images.map(_.toString))
+      })
     })
-  }.flatten
+  }
 
-  override def getScraped(request: GetScrapedRequest): Future[ScrapedImages] = Future {
-    val website: WebsiteContext = ScraperServiceModelConversions.fromProto(request.website.getOrElse(
-      throw new IllegalArgumentException("missing website parameter in get scrapped images request")
-    ))
-    Scraper.getScrapedImages(website).map({
-      case Left(error) => throw new Exception(error.toString)
-      case Right(images) => ScrapedImages(images.map(_.toString))
+  override def getScraped(request: GetScrapedRequest): Future[ScrapedImages] =  {
+    val websiteFut: Future[WebsiteContext] = request.website.map(ScraperServiceModelConversions.fromProto)
+      .map(Future.successful)
+      .getOrElse(Future.failed(
+        Status.INVALID_ARGUMENT
+          .augmentDescription("Missing website parameter in get scraped images request")
+          .asRuntimeException()
+      ))
+
+    websiteFut.flatMap(website => {
+      Scraper.getScrapedImages(website).map({
+        case Left(error) => throw Status.INTERNAL
+          .augmentDescription(error.toString)
+          .asRuntimeException()
+        case Right(images) => ScrapedImages(images.map(_.toString))
+      })
     })
-  }.flatten
+  }
 }
 
 

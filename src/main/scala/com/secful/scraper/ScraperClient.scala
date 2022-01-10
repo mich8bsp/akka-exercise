@@ -4,13 +4,14 @@ import com.secful.scraper.Scraper.WebsiteContext
 import com.secful.scraper.ScraperServiceModelConversions.toProto
 import com.secful.scraperservice.scraper_service.ScraperGrpc.ScraperStub
 import com.secful.scraperservice.scraper_service.{GetScrapedRequest, ScrapeRequest, ScraperGrpc}
-import io.grpc.{ManagedChannel, ManagedChannelBuilder}
+import io.grpc.{ManagedChannel, ManagedChannelBuilder, StatusRuntimeException}
 
 import java.net.URL
 import java.nio.file.Path
 import java.util.concurrent.{Executors, TimeUnit}
 import scala.concurrent.duration.DurationInt
 import scala.concurrent.{Await, ExecutionContext, Future}
+import scala.util.{Failure, Success}
 
 object ScraperClient {
 
@@ -48,13 +49,33 @@ class ScraperClient private(
   }
 
   def scrapeImages(website: WebsiteContext): Future[Seq[Path]] = {
-    stub.scrape(ScrapeRequest(Some(toProto(website))))
+    val resFuture: Future[Seq[Path]] = stub.scrape(ScrapeRequest(Some(toProto(website))))
       .map(_.imagePaths.map(Path.of(_)))
+
+    resFuture.onComplete({
+      case Success(v) => println(s"Successfully scraped ${v.size} images from website ${website.name} at ${website.url}")
+      case Failure(e) => e match {
+        case rtEx: StatusRuntimeException =>
+          println(s"Failed scraping website ${website.name} at ${website.url} for images, code: ${rtEx.getStatus.getCode}, reason: ${rtEx.getStatus.getDescription}")
+      }
+    })
+
+    resFuture
   }
 
   def getScrapedImages(website: WebsiteContext): Future[Seq[Path]] = {
-    stub.getScraped(GetScrapedRequest(Some(toProto(website))))
+    val resFuture: Future[Seq[Path]] = stub.getScraped(GetScrapedRequest(Some(toProto(website))))
       .map(_.imagePaths.map(Path.of(_)))
+
+    resFuture.onComplete({
+      case Success(v) => println(s"Successfully fetched ${v.size} scraped images from website ${website.name} at ${website.url}")
+      case Failure(e) => e match {
+        case rtEx: StatusRuntimeException =>
+          println(s"Failed fetching scraped images from website ${website.name} at ${website.url}, code: ${rtEx.getStatus.getCode}, reason: ${rtEx.getStatus.getDescription}")
+      }
+    })
+
+    resFuture
   }
 
 }
