@@ -10,4 +10,9 @@ object ScraperServiceModelConversions {
     name = w.name,
     url = new URL(w.url)
   )
+
+  def toProto(w: WebsiteContext): Website = Website(
+    name = w.name,
+    url = w.url.toString
+  )
 }
