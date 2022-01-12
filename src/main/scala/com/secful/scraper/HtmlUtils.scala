@@ -26,17 +26,14 @@ object HtmlUtils {
         .asScala
         .toSeq
         .distinct
-        .map(url => {
-          val absoluteUrl: URL = if (url.startsWith("http")) {
-            new URL(url)
-          } else if (url.startsWith("www")){
-            new URL(s"https://$url")
-          }else {
-            new URL(s"${source.map(getSourceDirPath).map(_.toString).getOrElse("")}$url")
-          }
-          HtmlImageElement(absoluteUrl)
-        })
+        .map(url => HtmlImageElement(pathToAbsoluteUrl(url, source)))
     }).toEither.left.map(e => s"Invalid HTML page: ${e.getMessage}")
+  }
+
+  private def pathToAbsoluteUrl(path: String, source: Option[URL] = None): URL = path match {
+    case x if x.startsWith("http") => new URL(path)
+    case x if x.startsWith("www") => new URL(s"https://$path")
+    case _ => new URL(s"${source.map(getSourceDirPath).map(_.toString).getOrElse("")}$path")
   }
 
   private [HtmlUtils] def getSourceDirPath(source: URL): URL = {

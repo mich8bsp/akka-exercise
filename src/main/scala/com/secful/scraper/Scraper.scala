@@ -19,6 +19,105 @@ import com.secful.scraper.Scraper.{GetScrapedImagesRequest, ScrapeImagesRequest,
 import java.nio.file.attribute.{PosixFilePermission, PosixFilePermissions}
 import java.util.concurrent.Executors
 
+
+class ScraperActor extends Actor {
+  import Scraper.timeout
+  private implicit val ec: ExecutionContext = context.dispatcher
+
+  private val parserActor: ActorRef = context.actorOf(HtmlParsingActor.props)
+  private val downloadActor: ActorRef = context.actorOf(ImageDownloadActor.props)
+  private val fsActor: ActorRef = context.actorOf(FileSystemActor.props)
+
+  def parseWebsiteImages(implicit website: WebsiteContext): Future[Either[ScraperError, WebsiteImageElements]] = {
+    (parserActor ? ParseWebsiteImages(website))
+      .mapTo[Either[ScraperError, WebsiteImageElements]]
+  }
+
+  def downloadImages(urls: Seq[URL])
+                    (implicit website: WebsiteContext): Future[Either[ScraperError, Seq[Image]]] = {
+    (downloadActor ? DownloadImagesRequest(website, urls))
+      .mapTo[Seq[Either[ScraperError, Image]]]
+      .map(results => {
+        val successful = results.flatMap(_.toOption)
+        val errors = results.flatMap(_.left.toOption)
+        if(errors.nonEmpty){
+          Left(ImagesDownloadError.combine(errors))
+        }else{
+          Right(successful)
+        }
+      })
+  }
+
+  def storeImages(images: Seq[Image])
+                 (implicit website: WebsiteContext): Future[Either[ScraperError, Seq[Path]]] = {
+    (fsActor ? StoreImagesRequest(website, images))
+      .mapTo[Seq[Either[ScraperError, Path]]]
+      .map(results => {
+        val successful = results.flatMap(_.toOption)
+        val errors = results.flatMap(_.left.toOption)
+        if(errors.nonEmpty){
+          Left(ImageFilesWritingError.combine(errors))
+        }else{
+          Right(successful)
+        }
+      })
+  }
+
+  def getStoredImages(website: WebsiteContext): Future[Either[ScraperError, Seq[Path]]] = {
+    (fsActor ? GetScrapedImagesRequest(website))
+      .mapTo[Either[ScraperError, Seq[Path]]]
+  }
+
+  override def receive: Receive = {
+    case r: ScrapeImagesRequest =>
+      implicit val websiteContext: WebsiteContext = r.website
+      val capturedSender = sender()
+
+      val scrapingResult = for {
+        htmlElements <- EitherT(parseWebsiteImages)
+        imageUrls = htmlElements.elements.map(_.url)
+        images <- if (imageUrls.isEmpty) {
+          EitherT.fromEither[Future](Left(HtmlParsingError(websiteContext, s"Contains no images")))
+        } else {
+          EitherT(downloadImages(imageUrls))
+        }
+        storedFiles <- EitherT(storeImages(images))
+      }yield {
+        storedFiles
+      }
+
+      scrapingResult.value.onComplete(res => capturedSender ! res.get)
+
+    case r: GetScrapedImagesRequest =>
+      val capturedSender = sender()
+      val images = getStoredImages(r.website)
+
+      images.onComplete(res => capturedSender ! res.get)
+  }
+}
+
+object Scraper {
+  private val scraperSystem = ActorSystem("scraper-system")
+  private val scraperActor: ActorRef = scraperSystem.actorOf(Props(new ScraperActor), "scraper-actor")
+  private [scraper] implicit val timeout: Timeout = 15.seconds
+
+  def scrapeWebsite(websiteContext: WebsiteContext): Future[Either[ScraperError, Seq[Path]]] = {
+    (scraperActor ? ScrapeImagesRequest(websiteContext))
+      .mapTo[Either[ScraperError, Seq[Path]]]
+  }
+
+  def getScrapedImages(websiteContext: WebsiteContext): Future[Either[ScraperError, Seq[Path]]] = {
+    (scraperActor ? GetScrapedImagesRequest(websiteContext))
+      .mapTo[Either[ScraperError, Seq[Path]]]
+  }
+
+  case class ScrapeImagesRequest(website: WebsiteContext)
+  case class GetScrapedImagesRequest(website: WebsiteContext)
+  case class WebsiteContext(name: String, url: URL)
+}
+
+
+
 class HtmlParsingActor extends Actor {
   implicit val as = context.system
   private val threadPool = Executors.newFixedThreadPool(5)
@@ -140,100 +239,3 @@ object FileSystemActor {
 
   case class StoreImagesRequest(website: WebsiteContext, images: Seq[Image])
 }
-
-class ScraperActor extends Actor {
-  import Scraper.timeout
-  private implicit val ec: ExecutionContext = context.dispatcher
-
-  private val parserActor: ActorRef = context.actorOf(HtmlParsingActor.props)
-  private val downloadActor: ActorRef = context.actorOf(ImageDownloadActor.props)
-  private val fsActor: ActorRef = context.actorOf(FileSystemActor.props)
-
-  def parseWebsiteImages(implicit website: WebsiteContext): Future[Either[ScraperError, WebsiteImageElements]] = {
-    (parserActor ? ParseWebsiteImages(website))
-      .mapTo[Either[ScraperError, WebsiteImageElements]]
-  }
-
-  def downloadImages(urls: Seq[URL])
-                    (implicit website: WebsiteContext): Future[Either[ScraperError, Seq[Image]]] = {
-    (downloadActor ? DownloadImagesRequest(website, urls))
-      .mapTo[Seq[Either[ScraperError, Image]]]
-      .map(results => {
-        val successful = results.flatMap(_.toOption)
-        val errors = results.flatMap(_.left.toOption)
-        if(errors.nonEmpty){
-          Left(ImagesDownloadError.combine(errors))
-        }else{
-          Right(successful)
-        }
-      })
-  }
-
-  def storeImages(images: Seq[Image])
-                 (implicit website: WebsiteContext): Future[Either[ScraperError, Seq[Path]]] = {
-    (fsActor ? StoreImagesRequest(website, images))
-      .mapTo[Seq[Either[ScraperError, Path]]]
-      .map(results => {
-        val successful = results.flatMap(_.toOption)
-        val errors = results.flatMap(_.left.toOption)
-        if(errors.nonEmpty){
-          Left(ImageFilesWritingError.combine(errors))
-        }else{
-          Right(successful)
-        }
-      })
-  }
-
-  def getStoredImages(website: WebsiteContext): Future[Either[ScraperError, Seq[Path]]] = {
-    (fsActor ? GetScrapedImagesRequest(website))
-      .mapTo[Either[ScraperError, Seq[Path]]]
-  }
-
-  override def receive: Receive = {
-    case r: ScrapeImagesRequest =>
-      implicit val websiteContext: WebsiteContext = r.website
-      val capturedSender = sender()
-
-      val scrapingResult = for {
-        htmlElements <- EitherT(parseWebsiteImages)
-        imageUrls = htmlElements.elements.map(_.url)
-        images <- if (imageUrls.isEmpty) {
-          EitherT.fromEither[Future](Left(HtmlParsingError(websiteContext, s"Contains no images")))
-        } else {
-          EitherT(downloadImages(imageUrls))
-        }
-        storedFiles <- EitherT(storeImages(images))
-      }yield {
-        storedFiles
-      }
-
-      scrapingResult.value.onComplete(res => capturedSender ! res.get)
-
-    case r: GetScrapedImagesRequest =>
-      val capturedSender = sender()
-      val images = getStoredImages(r.website)
-
-      images.onComplete(res => capturedSender ! res.get)
-  }
-}
-
-object Scraper {
-  private val scraperSystem = ActorSystem("scraper-system")
-  private val scraperActor: ActorRef = scraperSystem.actorOf(Props(new ScraperActor), "scraper-actor")
-  private [scraper] implicit val timeout: Timeout = 15.seconds
-
-  def scrapeWebsite(websiteContext: WebsiteContext): Future[Either[ScraperError, Seq[Path]]] = {
-    (scraperActor ? ScrapeImagesRequest(websiteContext))
-      .mapTo[Either[ScraperError, Seq[Path]]]
-  }
-
-  def getScrapedImages(websiteContext: WebsiteContext): Future[Either[ScraperError, Seq[Path]]] = {
-    (scraperActor ? GetScrapedImagesRequest(websiteContext))
-      .mapTo[Either[ScraperError, Seq[Path]]]
-  }
-
-  case class ScrapeImagesRequest(website: WebsiteContext)
-  case class GetScrapedImagesRequest(website: WebsiteContext)
-  case class WebsiteContext(name: String, url: URL)
-}
-
