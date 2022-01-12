@@ -73,15 +73,23 @@ class ScraperActor extends Actor {
       implicit val websiteContext: WebsiteContext = r.website
       val capturedSender = sender()
 
-      val scrapingResult = for {
+      val scrapingResult: EitherT[Future, ScraperError, Seq[Path]] = for {
         htmlElements <- EitherT(parseWebsiteImages)
         imageUrls = htmlElements.elements.map(_.url)
-        images <- if (imageUrls.isEmpty) {
-          EitherT.fromEither[Future](Left(HtmlParsingError(websiteContext, s"Contains no images")))
-        } else {
-          EitherT(downloadImages(imageUrls))
+        images <- {
+          if (imageUrls.isEmpty) {
+            EitherT.fromEither[Future](Right[ScraperError, Seq[Image]](Seq[Image]()))
+          } else {
+            EitherT(downloadImages(imageUrls))
+          }
         }
-        storedFiles <- EitherT(storeImages(images))
+        storedFiles <- {
+          if (images.isEmpty) {
+            EitherT.fromEither[Future](Right[ScraperError, Seq[Path]](Seq[Path]()))
+          } else {
+            EitherT(storeImages(images))
+          }
+        }
       }yield {
         storedFiles
       }
