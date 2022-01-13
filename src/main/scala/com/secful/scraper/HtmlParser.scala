@@ -53,7 +53,7 @@ class HtmlParsingActor extends Actor {
         case Success(res) => capturedSender ! res
         case Failure(e) =>
           println(s"Unhandled error while parsing html ${e.getMessage}")
-          capturedSender ! Future.failed(e)
+          capturedSender ! Left(HtmlParsingError(website, "Unexpected error"))
       })
   }
 }
