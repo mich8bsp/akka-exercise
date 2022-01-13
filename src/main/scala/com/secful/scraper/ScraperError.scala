@@ -8,6 +8,11 @@ sealed trait ScraperError{
   val website: WebsiteContext
   val reason: String
 }
+
+case class ScrapingProcessError(website: WebsiteContext, reason: String) extends ScraperError {
+  override def toString: String = s"Scraping of website ${website.name} at ${website.url} failed: $reason"
+}
+
 case class HtmlParsingError(website: WebsiteContext, reason: String) extends ScraperError {
   override def toString: String = s"Failed to parse website ${website.name} at ${website.url}: $reason"
 }

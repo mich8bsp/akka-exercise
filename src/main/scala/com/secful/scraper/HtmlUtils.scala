@@ -7,33 +7,36 @@ import org.jsoup.parser.Parser
 import java.net.URL
 import scala.jdk.CollectionConverters.ListHasAsScala
 import scala.util.Try
+import cats.implicits._
 
 object HtmlUtils {
 
-  def parseImages(page: String, source: Option[URL] = None): Either[String, Seq[HtmlImageElement]] = {
+
+  def parseImages(page: String, source: URL): Try[Seq[HtmlImageElement]] = {
     val parser = Parser.htmlParser
       .setTrackErrors(1)
 
-    Try({
+    Try {
       val dom = Jsoup.parse(page, parser)
 
-      if(!parser.getErrors.isEmpty){
-        throw new Exception(parser.getErrors.get(0).getErrorMessage)
+      parser.getErrors.asScala.toList.toNel match {
+        case None =>
+          val elements = dom.select("img")
+          elements.eachAttr("src")
+            .asScala
+            .toSeq
+            .distinct
+            .map(url => HtmlImageElement(pathToAbsoluteUrl(url, source)))
+        case Some(errors) =>
+          throw new Exception(errors.head.getErrorMessage)
       }
-      val elements = dom
-        .select("img")
-      elements.eachAttr("src")
-        .asScala
-        .toSeq
-        .distinct
-        .map(url => HtmlImageElement(pathToAbsoluteUrl(url, source)))
-    }).toEither.left.map(e => s"Invalid HTML page: ${e.getMessage}")
+    }
   }
 
-  private def pathToAbsoluteUrl(path: String, source: Option[URL] = None): URL = path match {
+  private def pathToAbsoluteUrl(path: String, source: URL): URL = path match {
     case x if x.startsWith("http") => new URL(path)
     case x if x.startsWith("www") => new URL(s"https://$path")
-    case _ => new URL(s"${source.map(getSourceDirPath).map(_.toString).getOrElse("")}$path")
+    case _ => new URL(s"${getSourceDirPath(source)}$path")
   }
 
   private [HtmlUtils] def getSourceDirPath(source: URL): URL = {

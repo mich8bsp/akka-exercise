@@ -15,6 +15,7 @@ private class ScraperImpl(implicit ec: ExecutionContext) extends ScraperGrpc.Scr
           .augmentDescription("Missing website parameter in scrape request")
           .asRuntimeException()
       ))
+
     websiteFut.flatMap(website => {
       Scraper.scrapeWebsite(website).map({
         case Left(error) => throw Status.INTERNAL
